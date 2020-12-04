@@ -1,0 +1,499 @@
+---
+title: "kickstarter_project"
+author: "Grecia"
+date: "12/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Proyecto de kickstarter
+
+Utilizaremos la base del proyecto [http://saumyaray.me/files/Kickstarter%20Data%20Analysis.pdf] para realizar un analisis de lo siguiente:
+
+1. ¿La duración de la campaña afecta la tasa de éxito?
+
+2. ¿Cuál es la relación entre el objetivo ($) y el éxito de la campaña? y
+
+2a. ¿Cuál es la relación entre la distribución de objetivo y el monto recaudado.
+
+
+
+Empezaremos por fijar  nuestro directorio de trabajo y  las librerias utilizadas
+ 
+```{r,message=FALSE}
+library(magrittr)
+library(lubridate)
+library(dygraphs)
+library(xts)
+library(dplyr)
+library(utils)
+library(zoo)
+library(TTR)
+library(forecast)
+library(ggplot2)
+library(scales)
+library(ggrepel)
+```
+
+
+```{r}
+#Directorio de trabajo
+setwd("~/Desktop/programacion/Python/kickstarter/ks-projects-201801.csv")
+ks<-read.csv("ks-projects-201801.csv",sep = ",",na.strings = "")
+
+```
+
+Vemos algunas caracteristicas  de unas variables con la  función summary
+
+```{r}
+summary(ks)
+```
+
+## Limpieza de la base
+
+Inconsistencias de la base:
+
+1. En la base se encuentran unas fechas con formato inconsistente del año de 1970
+
+2.La columna deadline y launched no están en formato de fecha
+
+3. La columna de launched contiene la hora de la fecha, por lo que se removerá la hora para un mejor manejo de la base.
+
+
+#### Formato de fecha     hh  kj
+
+Cambiamos el formato de la columna launch a fecha y le quitamos la hora
+
+```{r}
+#Seleccionamos primero las variables de interés para u nuevo dataframe
+ks1<-ks %>%
+  select(ID,deadline,launched, state, currency, goal,usd.pledged,usd_pledged_real,usd_goal_real)
+#La base se verá de la siguiente manera
+head(ks1)
+#cambiamos el formato de las columnas a fecha
+ks1$deadline %<>% ymd()
+#summary(ks1)
+
+#La columna launched la convertimos a
+Lan<- as.POSIXlt(ks1$launched)
+#Quitamos la hora
+Lan1<-strftime(Lan,format="%Y-%m-%d")
+#Convertimos a dataframe el formato
+Launch2<-data.frame(Lan1)
+#head(Launch2)
+#summary(Launch2)
+#Convertimos  a formato de fecha la columna de launched
+Launch2$Lan1%<>% ymd()
+#summary(Launch2)
+
+```
+
+
+```{r}
+#Unimos la columna de launched ya en su formato de fecha  y sin la hora a nuestro dataframe ks1
+Launch3<-ks1 %>%
+  bind_cols(Launch2)
+
+#Eliminamos las fechas con formato inconsistente y calculamos la diferencia de días de las campaña
+ks4<-Launch3%>%
+  mutate(Lenght_campaing=difftime(deadline,Lan1)) %>%
+  filter(launched!="1970-01-01")
+
+#Convertimos la nueva columna a formato numérico para trabajar con los datos.
+ks4$Lenght_campaing<-as.numeric(ks4$Lenght_campaing)
+#head(ks4)
+#summary(ks4)
+
+```
+#### Categorizamos los dias de campaña por grupos
+
+Grupo 1: 0-7 días
+Grupo 2: 8-22 días
+Grupo 3: 23-37 días
+Grupo 4: 38-52 días
+Grupo 5: 53-68 días
+Grupo 6: 69-82 días
+Grupo 7: 83-92 días
+
+
+```{r}
+
+#categorizar por rangos de acuerdo a los días de campaña
+ks5<-ks4 %>%
+  filter(Lenght_campaing<=92)
+
+ks5$Lenght_campaing<-cut(ks5$Lenght_campaing,breaks=c(0,8,23,38,53,69,83,92),labels=c("1","2","3","4","5","6","7"))
+#La base se ve de la siguiente manera
+head(ks5)
+```
+
+
+
+```{r}
+summary(ks5$Lenght_campaing)
+```
+
+# ¿La duración de la campaña afecta la tasa de éxito?
+
+## Campañas exitosas 
+
+```{r}
+piedf<-ks5%>%
+  filter(state=="successful") 
+
+piedf%>%
+  count(Lenght_campaing) %>%
+  mutate(prop = percent(n / sum(n)))%>%
+ggplot( aes(x="", y=n, fill=Lenght_campaing))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Succesful Campaings") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+```
+
+## Campañas fallidas
+
+```{r}
+pieFailed<-ks5%>%
+  filter(state=="failed") 
+
+pieFailed%>%
+  count(Lenght_campaing) %>%
+  mutate(prop = percent(n / sum(n)))%>%
+ggplot( aes(x="", y=n, fill=Lenght_campaing))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Failed Campaings") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+```
+
+## Campañas canceladas
+```{r}
+piecancel<-ks5%>%
+  filter(state=="canceled") 
+head(piecancel)
+
+piecancel%>%
+  count(Lenght_campaing) %>%
+  mutate(prop = percent(n / sum(n)))%>%
+  ggplot( aes(x="", y=n, fill=Lenght_campaing))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Cancel Campaings") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+```
+
+## Frecuencia de las campañas
+
+```{r}
+histSuces<-ks4%>%
+  filter(state=="successful")
+
+ggplot(data=histSuces, aes(x=Lenght_campaing)) + 
+  geom_histogram(color="blue")
+
+```
+
+## Frecuencia de campañas fallidas
+```{r}
+histFail<-ks4%>%
+  filter(state=="failed")
+#head(histFail)
+
+ggplot(data=histFail, aes(x=Lenght_campaing)) + 
+  geom_histogram(color="blue")
+```
+
+## Frecuencia de campañas canceladas
+```{r}
+histcanceled<-ks4%>%
+  filter(state=="canceled")
+#head(histcanceled)
+
+ggplot(data=histcanceled, aes(x=Lenght_campaing)) + 
+  geom_histogram(color="blue")
+
+```
+
+
+## Diagrama de caja 
+Dias de campaña
+
+```{r}
+
+ks11<-ks4%>%
+  filter(Lenght_campaing<=92)
+ggplot(ks11,aes(x=state,y=Lenght_campaing, fill=state)) +
+  geom_boxplot() 
+```
+
+
+## Campañas por dias
+
+#### el grupo 1 es de  1-7 días
+
+```{r}
+
+pie1<-ks5%>%
+  filter(Lenght_campaing=="1")
+
+pie1%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 1") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+#head(pie1)
+
+ pie1%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+```
+
+#### Grupo 2 (8-22 días)
+
+```{r}
+pie2<-ks5%>%
+  filter(Lenght_campaing=="2")
+
+pie2%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 2") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie2%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+
+
+```
+
+
+#### Grupo 3 (23-37 días)
+
+```{r}
+pie3<-ks5%>%
+  filter(Lenght_campaing=="3")
+
+pie3%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 3") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie3%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+
+```
+
+#### Grupo 4
+
+```{r}
+pie4<-ks5%>%
+  filter(Lenght_campaing=="4")
+
+pie4%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 4") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie4%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+```
+
+#### Grupo 5
+
+```{r}
+pie5<-ks5%>%
+  filter(Lenght_campaing=="5")
+
+pie5%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("group 5") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie5%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+```
+
+#### Grupo 6
+```{r}
+pie6<-ks5%>%
+  filter(Lenght_campaing=="6")
+
+pie6%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 6") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie6%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+
+```
+
+#### Group 7
+
+```{r}
+pie7<-ks5%>%
+  filter(Lenght_campaing=="7")
+
+pie7%>%
+  count(state)%>%
+  mutate(prop = percent(n / sum(n))) %>%
+  ggplot( aes(x="", y=n, fill=state))+
+  geom_bar(width = 1, stat = "identity")+ ggtitle("Group 7") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1)
+
+pie7%>% count(state)%>%
+  ggplot( aes(x=state,y=n,fill=state)) +
+  geom_bar(stat="identity")
+
+
+
+```
+
+
+
+La duración de campaña y el éxito de campaña están relacionadas, pues en las gráficas del grupo 1 (0-7 días), grupo 2 (8-22 días) y grupo 3 (23-37 días)  se observa que el porcentaje de éxito de campaña está entre el 35%-44%. Conforme pasan los días de periodo de campaña, el porcentaje de éxito disminuye, entre más larga la duración de campaña, las campañas tienden más al fracaso. En el grupo 5 y 7, el éxito de campaña tiene un menor porcentaje, entre 20% y 28%.
+
+
+
+# Relación entre el objetivo y el éxito de la campaña y el objetivo y la cantidad recaudada
+
+#### función de distribución empírica dell objetivo de las campañas exitosas
+
+```{r}
+#Objetivo de campaña 
+options(scipen = 9999)
+ggplot(ks5, aes(goal)) + stat_ecdf(geom = "step")
+
+```
+
+# Analisis de disitntos rangos de metas para la campaña
+
+## Grupo 1
+
+```{r}
+#distribucion acumulativa empirica
+
+emp1<-ks5 %>% filter(goal<1000)
+
+ emp1%>% count(state) %>% mutate(prop = percent(n / sum(n))) %>% ggplot(aes(x="", y=n, fill=state))+ geom_bar(width = 1, stat = "identity")+ ggtitle("Group 1: <= 1000 (USD)") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1) 
+
+summary(emp1$goal)
+
+emp1%>%
+ggplot(aes(goal)) + stat_ecdf(geom = "step")
+
+
+
+
+```
+
+# Grupo 2
+```{r}
+
+emp2<-ks5 %>% filter(goal>1000 &goal<=10000)
+
+ emp2%>% count(state) %>% mutate(prop = percent(n / sum(n))) %>% ggplot(aes(x="", y=n, fill=state))+ geom_bar(width = 1, stat = "identity")+ ggtitle("Group 1: <= 1000 (USD)") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1) 
+
+summary(emp2$goal)
+
+emp2%>%
+ggplot(aes(goal)) + stat_ecdf(geom = "step")
+
+```
+# Grupo 3
+
+```{r}
+emp3<-ks5 %>% filter(goal>10000 &goal<=100000)
+
+ emp3%>% count(state) %>% mutate(prop = percent(n / sum(n))) %>% ggplot(aes(x="", y=n, fill=state))+ geom_bar(width = 1, stat = "identity")+ ggtitle("Group 3: 10000<x<100000 (USD)") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1) 
+
+summary(emp3$goal)
+
+emp3%>%
+ggplot(aes(goal)) + stat_ecdf(geom = "step")
+
+```
+
+
+# Grupo 4 
+
+```{r}
+emp4<-ks5 %>% filter(goal>100000)
+
+emp4%>%
+ggplot(aes(goal)) + stat_ecdf(geom = "step")
+
+summary(emp4$goal)
+
+emp4%>% count(state) %>% mutate(prop = percent(n / sum(n))) %>% ggplot(aes(x="", y=n, fill=state))+ geom_bar(width = 1, stat = "identity")+ ggtitle("Group 4 : > 100000 (USD)") + theme_void() + coord_polar("y", start=0)+geom_label_repel(aes(label = prop), size=5, show.legend = F, nudge_x = 1) 
+
+```
+
+
+Entre más rande sea el valor de goal, es decir del dinero, mayor es la tendencia a que la campaña fracase. Se observa en el grupo 1 las campañas con menos dinero fueron las que resultaron exitosas. Mientras que en los demás grupos predominaron las campañas que fracasaron.
+
+
+## Diferencia de Goal y pledge
+
+con función de distribución empírica
+```{r}
+# Empirical de pledged
+
+ks7<-ks4%>% 
+  mutate(diferencia=goal-usd.pledged)
+ggplot(ks7,aes(diferencia)) + stat_ecdf(geom = "step")
+        
+# ks8<-ks7%>%
+#   mutate(diferencia_1=usd_goal_real-usd_pledged_real)
+# ggplot(ks8,aes(diferencia_1)) + stat_ecdf(geom = "step")
+
+```
+
+#### Grupo 1 
+```{r}
+emp11<-emp1%>%
+   mutate(diferencia_1=usd_goal_real-usd_pledged_real)
+ggplot(emp11,aes(diferencia_1)) + stat_ecdf(geom = "step")
+
+
+```
+
+#### Grupo 2
+
+
+```{r}
+emp22<-emp2%>%
+   mutate(diferencia_1=usd_goal_real-usd_pledged_real)
+ggplot(emp22,aes(diferencia_1)) + stat_ecdf(geom = "step")
+
+```
+
+#### Grupo 3
+
+
+```{r}
+emp33<-emp3%>%
+   mutate(diferencia_1=usd_goal_real-usd_pledged_real)
+ggplot(emp33,aes(diferencia_1)) + stat_ecdf(geom = "step")
+
+```
+
+#### Grupo 4
+
+
+```{r}
+emp44<-emp4%>%
+   mutate(diferencia_1=usd_goal_real-usd_pledged_real)
+ggplot(emp44,aes(diferencia_1)) + stat_ecdf(geom = "step")
+
+```
+
+
+Las campañas tienen diferencias positivas.
+
